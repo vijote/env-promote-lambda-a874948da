@@ -1,14 +1,17 @@
+use std::convert::Infallible;
 use std::env;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_cloudfront::types::{Origin, Origins};
 use aws_sdk_cloudfront::Client as CloudFrontClient;
-use lambda_http::{run, service_fn, Error, Request, Response, IntoResponse, http::{StatusCode, Method}};
+use lambda_http::{run, service_fn, Body, Error, Request, Response, IntoResponse, http::{StatusCode, Method}};
 use serde::{Deserialize, Serialize};
 use lambda_http::RequestPayloadExt;
 use aws_sdk_cloudfront::types::{
     AllowedMethods, CacheBehavior, CacheBehaviors, Method as CFMethod, ViewerProtocolPolicy,
 };
+use aws_sdk_dynamodb::{Client as DynamoClient};
+use aws_sdk_dynamodb::types::AttributeValue;
 
 // Tu estructura de entrada se mantiene igual
 #[derive(Deserialize)]
@@ -19,6 +22,7 @@ struct DeployRequest {
     host_bucket_name: String,
     recipes_bucket_name: String,
     alb_dns_name: String,
+    environment_id: String
 }
 
 // Tu estructura de salida para respuestas exitosas
@@ -41,7 +45,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn handler(event: Request) -> Result<impl IntoResponse, Error> {
+async fn handler(event: Request) -> Result<Response<String>, Infallible> {
     let path = event.uri().path();
     let method = event.method();
 
@@ -53,7 +57,7 @@ async fn handler(event: Request) -> Result<impl IntoResponse, Error> {
             .header("allow", "POST, OPTIONS")
             .header("access-control-allow-methods", "POST, OPTIONS")
             .header("access-control-allow-headers", "content-type")
-            .body("".to_string())?);
+            .body("".to_string()).expect("Error building response!"));
     }
 
     // 2. Enrutamiento estricto para el negocio: Validamos que sea un POST a /api/create
@@ -63,7 +67,8 @@ async fn handler(event: Request) -> Result<impl IntoResponse, Error> {
             .header("content-type", "application/json")
             .body(serde_json::to_string(&ErrorResponse {
                 error: format!("Ruta no encontrada: {} {}", method, path),
-            })?)?);
+            }).expect("Error creating request!"))
+            .expect("Error building request!"));
     }
 
     // 2. Extraer y deserializar el body JSON
@@ -74,48 +79,83 @@ async fn handler(event: Request) -> Result<impl IntoResponse, Error> {
             return Ok(Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
-                .body(serde_json::to_string(&err.unwrap_err().to_string())?)?);
+                .body(
+                    serde_json::to_string(&err.unwrap_err().to_string())
+                    .expect("Error creating response!")
+                )
+                .expect("Error building response!")
+            );
         }
     };
 
     // 3. Inicializar AWS SDK (Mantenemos tu lógica original)
     let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let cf_client = CloudFrontClient::new(&config);
+    let dynamo_client = DynamoClient::new(&config);
 
     // 4. Ejecutar el despliegue
-    match promote_environment(
+    promote_environment(
         &cf_client,
         &payload.distribution_id,
         &payload.host_bucket_name,
         &payload.oac_id,
         &payload.recipes_bucket_name,
         &payload.alb_dns_name
-    ).await {
-        Ok(()) => {
+    ).await.expect("Error al promover!!");
+
+    let table_name= env::var("AWS_REGION").expect("variable AWS_REGION no existe!");
+    return update_environment_record(&dynamo_client, &table_name, &payload.environment_id).await;
+}
+
+async fn update_environment_record(
+    dynamo_client: &DynamoClient,
+    table_name: &str,
+    environment_id: &str,
+) -> Result<Response<String>, std::convert::Infallible> {
+    let result = dynamo_client
+        .update_item()
+        .table_name(table_name)
+        .key("environment", AttributeValue::S(environment_id.to_string()))
+        .update_expression("SET env_status = :newStatus")
+        .expression_attribute_values(
+            ":newStatus",
+            AttributeValue::S("green".to_string()),
+        )
+        .send()
+        .await;
+
+    match result
+    {
+        Ok(_output) => {
             let res = DeployResponse {
-                message: format!("Stack promovido"),
-                
+                message: format!("Stack promovido"),  
             };
-            
             // Retornamos un 200 OK con el JSON correspondiente
             Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "application/json")
-                .body(serde_json::to_string(&res)?)?)
+                .body(
+                    serde_json::to_string(&res)
+                    .expect("Error creating response!!")
+                )
+                .expect("Error building response!")
+            )
         }
         Err(err) => {
-            // Si falla CloudFormation, respondemos con un 500 Internal Server Error
             Ok(Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header("content-type", "application/json")
-                .body(serde_json::to_string(&ErrorResponse {
-                    error: format!("Error al crear el stack de CloudFormation: {:?}", err),
-                })?)?)
+                .body(
+                    serde_json::to_string(&ErrorResponse {
+                        error: format!("Error al promover: {:?}", err),
+                    }).expect("Error creating response!!")
+                )
+                .expect("Error building response!")
+            )
         }
     }
 }
 
-/// Función para ejecutar el create_stack (Se mantiene idéntica a tu código original)
 async fn promote_environment(
     client: &CloudFrontClient,
     distribution_id: &str,
