@@ -4,7 +4,7 @@ use std::env;
 use aws_config::BehaviorVersion;
 use aws_sdk_cloudfront::types::{Origin, Origins};
 use aws_sdk_cloudfront::Client as CloudFrontClient;
-use lambda_http::{run, service_fn, Body, Error, Request, Response, IntoResponse, http::{StatusCode, Method}};
+use lambda_http::{run, service_fn, Error, Request, Response, http::{StatusCode, Method}};
 use serde::{Deserialize, Serialize};
 use lambda_http::RequestPayloadExt;
 use aws_sdk_cloudfront::types::{
