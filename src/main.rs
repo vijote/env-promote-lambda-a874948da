@@ -61,7 +61,7 @@ async fn handler(event: Request) -> Result<Response<String>, Infallible> {
     }
 
     // 2. Enrutamiento estricto para el negocio: Validamos que sea un POST a /api/create
-    if method != Method::POST || path != "/api/promote" {
+    if method != Method::POST || path != "/api/promote-green" {
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("content-type", "application/json")
