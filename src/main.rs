@@ -103,7 +103,7 @@ async fn handler(event: Request) -> Result<Response<String>, Infallible> {
         &payload.alb_dns_name
     ).await.expect("Error al promover!!");
 
-    let table_name= env::var("AWS_REGION").expect("variable AWS_REGION no existe!");
+    let table_name= env::var("TABLE_NAME").expect("variable TABLE_NAME no existe!");
     return update_environment_record(&dynamo_client, &table_name, &payload.environment_id).await;
 }
 
