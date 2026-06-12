@@ -468,6 +468,11 @@ async fn promote_environment(
 
     // --- PASO 4: Invalidar la caché para forzar la lectura del nuevo origen ---
     println!("Creando invalidación de caché para asegurar el cambio inmediato...");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
     client
     .create_invalidation()
     .distribution_id(distribution_id)
@@ -479,7 +484,7 @@ async fn promote_environment(
                     .quantity(1)
                     .build()?,
             )
-            .caller_reference(format!("invalidate-after-promote-{}", chronological_id)) // Usa un timestamp o uuid único
+            .caller_reference(format!("invalidate-after-promote-{}", timestamp)) // Usa un timestamp o uuid único
             .build()?,
     )
     .send()
