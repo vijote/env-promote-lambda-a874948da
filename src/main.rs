@@ -466,5 +466,24 @@ async fn promote_environment(
         .send()
         .await?;
 
+    // --- PASO 4: Invalidar la caché para forzar la lectura del nuevo origen ---
+    println!("Creando invalidación de caché para asegurar el cambio inmediato...");
+    client
+    .create_invalidation()
+    .distribution_id(distribution_id)
+    .invalidation_batch(
+        aws_sdk_cloudfront::types::InvalidationBatch::builder()
+            .paths(
+                aws_sdk_cloudfront::types::Paths::builder()
+                    .items("/*") // Invalida absolutamente todo
+                    .quantity(1)
+                    .build()?,
+            )
+            .caller_reference(format!("invalidate-after-promote-{}", chronological_id)) // Usa un timestamp o uuid único
+            .build()?,
+    )
+    .send()
+    .await?;
+
     Ok(())
 }
